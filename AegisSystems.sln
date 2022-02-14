@@ -3,23 +3,23 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AegisSystems", "AegisSystems.csproj", "{C1B150BC-6DFF-405D-9655-6BCF99C7B9FD}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AegisSystems", "AegisSystems.csproj", "{1EDB4F7F-608A-40F2-AF0D-B6BB10C44FE0}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
-		Debug|Any CPU = Debug|Any CPU
-		Release|Any CPU = Release|Any CPU
+		Debug|x86 = Debug|x86
+		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{C1B150BC-6DFF-405D-9655-6BCF99C7B9FD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{C1B150BC-6DFF-405D-9655-6BCF99C7B9FD}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{C1B150BC-6DFF-405D-9655-6BCF99C7B9FD}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{C1B150BC-6DFF-405D-9655-6BCF99C7B9FD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1EDB4F7F-608A-40F2-AF0D-B6BB10C44FE0}.Debug|x86.ActiveCfg = Debug|x86
+		{1EDB4F7F-608A-40F2-AF0D-B6BB10C44FE0}.Debug|x86.Build.0 = Debug|x86
+		{1EDB4F7F-608A-40F2-AF0D-B6BB10C44FE0}.Release|x86.ActiveCfg = Release|x86
+		{1EDB4F7F-608A-40F2-AF0D-B6BB10C44FE0}.Release|x86.Build.0 = Release|x86
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {A1658F10-B2DA-448D-BFC2-494CD4F3DADD}
+		SolutionGuid = {3EA97369-088E-4B13-8F7B-FB89B3EAD7EE}
 	EndGlobalSection
 EndGlobal

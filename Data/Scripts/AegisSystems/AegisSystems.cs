@@ -106,8 +106,11 @@ namespace RazMods
             MyAPIGateway.Entities.OnEntityAdd += CheckNewGrid;
             MyAPIGateway.Entities.OnEntityRemove += RemoveTheGrid;
             MyAPIGateway.Session.DamageSystem.RegisterBeforeDamageHandler(1, ShieldHandler);
-            
+
+
+
         }
+
 
         private void Grid_OnClose(IMyEntity obj)
         {
@@ -124,7 +127,7 @@ namespace RazMods
 
         private void ShieldHandler(object target, ref MyDamageInformation info)
         {
-
+           
             //MyAPIGateway.Utilities.ShowMessage("Aegis", "Damage: " + info.Amount + " target: " + target.GetType().ToString());
             if (target as IMySlimBlock != null)
             {
@@ -293,10 +296,17 @@ namespace RazMods
                 return;
             }
 
+            grid.OnBlockAdded -= Grid_OnBlockAdded;
+            grid.OnBlockRemoved -= Grid_OnBlockRemoved;
+            grid.OnClose -= Grid_OnClose;
+            grid.OnBlockIntegrityChanged -= Grid_OnBlockIntegrityChanged;
+
+
             var sg = shieldedGrids.Find(x => x.grid == grid);
             if(sg!=null)
             {
                 shieldedGrids.Remove(sg);
+
             }
         }
 
@@ -484,6 +494,7 @@ namespace RazMods
                     {
                        
                         info.Amount -= jd.CurrentStoredPower;
+                        info.IsDeformation = false;
                         jd.CurrentStoredPower = 0;
                         
                     }

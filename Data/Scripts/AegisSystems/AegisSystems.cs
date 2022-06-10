@@ -6,10 +6,16 @@ using VRage.ModAPI;
 using Sandbox.ModAPI;
 using Sandbox.Game;
 using VRageMath;
+using VRage.Utils;
+using System.IO;
 
 namespace RazMods
 {
-
+    [System.Serializable]
+    public class ShieldData
+    {
+        public float ShieldMultiplier = 0.8f;
+    }
 
     [MySessionComponentDescriptor(MyUpdateOrder.BeforeSimulation)]
     public class AegisSystems : MySessionComponentBase
@@ -20,7 +26,59 @@ namespace RazMods
         int delay = 0;
 
         public static float SHIELDCOEIFFIENT = 0.00002f;
+        public static float SHIELDMULTIPLIER = 0.8f;
 
+        public string shieldDataFile = "ShieldConfig.xml";
+        public ShieldData shieldData = null;
+
+        public override void LoadData()
+        {
+            base.LoadData();
+            MyLog.Default.WriteLineAndConsole("Shield Config Loading....");
+            if (MyAPIGateway.Utilities.FileExistsInWorldStorage(shieldDataFile, typeof(string)))
+            {
+                var reader = MyAPIGateway.Utilities.ReadFileInWorldStorage(shieldDataFile, typeof(string));
+                if (reader != null)
+                {
+                    string data = reader.ReadToEnd();
+                    shieldData = MyAPIGateway.Utilities.SerializeFromXML<ShieldData>(data);
+                    if (shieldData != null)
+                    {
+                        MyLog.Default.WriteLineAndConsole("Shield Config Loaded");
+                        AegisSystems.SHIELDMULTIPLIER = shieldData.ShieldMultiplier;
+                    }
+                    else
+                    {
+                        MyLog.Default.WriteLineAndConsole("Shield Config File was not Found. Creating Config File.");
+                        shieldData = new ShieldData();
+                        string shielddata = MyAPIGateway.Utilities.SerializeToXML(shieldData);
+                        TextWriter tw = MyAPIGateway.Utilities.WriteFileInWorldStorage(shieldDataFile, typeof(string));
+                        tw.Write(shielddata);
+                        tw.Close();
+                        MyLog.Default.WriteLineAndConsole("Shield Config Created");
+                    }
+                }
+            }
+
+        }
+
+
+        public override void SaveData()
+        {
+            base.SaveData();
+            if(shieldData==null)
+            {
+                shieldData = new ShieldData();
+            }
+            if (shieldData != null)
+            {
+                string shielddata = MyAPIGateway.Utilities.SerializeToXML(shieldData);
+                TextWriter tw = MyAPIGateway.Utilities.WriteFileInWorldStorage(shieldDataFile, typeof(string));
+                tw.Write(shielddata);
+                tw.Close();
+                MyLog.Default.WriteLineAndConsole("Shield Config Created");
+            }
+        }
 
 
         public override void UpdateBeforeSimulation()
@@ -348,6 +406,8 @@ namespace RazMods
         public bool shieldsup = false;
         public int buffer = 0;
         public int panelbuffer = 0;
+        public Color shieldsColor = Color.White;
+
         public MyGridShieldInfo(IMyCubeGrid g)
         {
             grid = g;
@@ -362,7 +422,18 @@ namespace RazMods
             jumpDrives = GetJumpDrives(grid);
             panels = GetPanels(grid);
             shieldStrength = GetShieldStrength(jumpDrives);
-            if(shieldStrength<=0.0f && shieldsup)
+
+            string fname = MyVisualScriptLogicProvider.GetPlayersFactionName(grid.BigOwners[0]);
+            IMyFaction faction = MyAPIGateway.Session.Factions.TryGetFactionByName(fname);
+
+            shieldsColor = Color.White;
+
+            if (faction != null)
+            {
+                shieldsColor = faction.IconColor;
+            }
+
+            if (shieldStrength<=0.0f && shieldsup)
             {
                 MyVisualScriptLogicProvider.PlaySingleSoundAtPosition("RazShieldDown", grid.GetPosition());
                 ShieldFX(false);
@@ -375,7 +446,7 @@ namespace RazMods
         {
             float ss = 0.0f;
             string bar = "";
-            while (ss < (Math.Ceiling(shieldStrength * 0.333)))
+            while (ss < (Math.Ceiling((shieldStrength / jumpDrives.Count) * 0.333)))
             {
                 bar = bar + Convert.ToChar(Convert.ToUInt32("e2d2", 16)).ToString();
                 ss += 0.1f;
@@ -397,7 +468,7 @@ namespace RazMods
                 }
                 if (jumpDrives.Count > 0)
                 {
-                    tp.WriteText(Math.Ceiling((shieldStrength * 100) * 0.333f) + "% \n", true);
+                    tp.WriteText(Math.Ceiling(((shieldStrength/ jumpDrives.Count) * 100) * 0.333f) + "% \n", true);
                     tp.WriteText(bar, true);
                 } else
                 {
@@ -411,6 +482,12 @@ namespace RazMods
         {
             List<IMySlimBlock> blocks = new List<IMySlimBlock>();
             grid.GetBlocks(blocks);
+
+
+
+            MyVisualScriptLogicProvider.SetAlphaHighlightForAll(grid.Name, enable, 10, 10, shieldsColor,null,0.025f);
+
+            /*
             foreach (var block in blocks)
             {
                 if (block != null)
@@ -418,19 +495,23 @@ namespace RazMods
                     var fat = block.FatBlock;
                     if (fat != null)
                     {
+                       
                        if(enable)
                        {
+                            
                             Vector3D fatcoord = block.FatBlock.GetPosition();
                             //Vector3D hitCoords = new Vector3D(block.Position.X, block.Position.Y, block.Position.Z) - cg.GetPosition();
                             MyVisualScriptLogicProvider.CreateParticleEffectAtPosition("RazElectric", fatcoord);
                        } else
                        {
+
                             Vector3D fatcoord = block.FatBlock.GetPosition();                           
                             MyVisualScriptLogicProvider.CreateParticleEffectAtPosition("RazElectric", fatcoord);
                         }
                     }
                 }
             }
+            */
         }
 
         public int MaxPowerJumpDrives()
@@ -465,7 +546,7 @@ namespace RazMods
                 UpdatePanels();
                 panelbuffer = 5;
             }
-            if (shieldstrength > (info.Amount * AegisSystems.SHIELDCOEIFFIENT))
+            if (shieldstrength > (info.Amount * AegisSystems.SHIELDCOEIFFIENT * AegisSystems.SHIELDMULTIPLIER))
             {
                 //block all damage               
                 ApplyShieldDamage(info.Amount);
@@ -516,16 +597,16 @@ namespace RazMods
                 {
                     if (j.IsFunctional && j.Enabled)
                     {
-                        if(j.CurrentStoredPower <= damage * AegisSystems.SHIELDCOEIFFIENT)
+                        if(j.CurrentStoredPower <= damage * (AegisSystems.SHIELDCOEIFFIENT * AegisSystems.SHIELDMULTIPLIER))
                         {
-                            damage -= j.CurrentStoredPower / AegisSystems.SHIELDCOEIFFIENT;
+                            damage -= j.CurrentStoredPower / (AegisSystems.SHIELDCOEIFFIENT* AegisSystems.SHIELDMULTIPLIER);
                             j.CurrentStoredPower = 0;
                             
                             MyVisualScriptLogicProvider.ShowNotification("Jump Drive: " + j.CustomName + " Has Been Fully Drained", 5000, "Red", j.OwnerId);
                         } else
                         {
                             //MyAPIGateway.Utilities.ShowMessage("Aegis", "JD Charge: "+ jd.CurrentStoredPower+" - Damage: "+(damage * 0.001f));
-                            j.CurrentStoredPower -= damage * AegisSystems.SHIELDCOEIFFIENT;
+                            j.CurrentStoredPower -= damage * (AegisSystems.SHIELDCOEIFFIENT * AegisSystems.SHIELDMULTIPLIER);
                             if(j.CurrentStoredPower <= 0.2 && j.CurrentStoredPower >= 0.19)
                             {
                                 MyVisualScriptLogicProvider.ShowNotification("Warning Shield Integrity for " + j.CustomName +"Critically Low", 5000, "Yellow", j.OwnerId);
@@ -602,8 +683,8 @@ namespace RazMods
             IEnumerable<IMyJumpDrive> jd = grid.GetFatBlocks<IMyJumpDrive>();
             foreach (var block in jd)
             {
-
-                jumpDrives.Add(block);
+                if (!block.CustomData.Contains("[NOSHIELD]"))
+                    jumpDrives.Add(block);
 
             }
             return jumpDrives;

@@ -15,6 +15,7 @@ namespace RazMods
     public class ShieldData
     {
         public float ShieldMultiplier = 0.8f;
+        public int ShieldBuffer = 5;
     }
 
     [MySessionComponentDescriptor(MyUpdateOrder.BeforeSimulation)]
@@ -27,7 +28,7 @@ namespace RazMods
 
         public static float SHIELDCOEIFFIENT = 0.00002f;
         public static float SHIELDMULTIPLIER = 0.8f;
-
+        public static int SHIELDBUFFER = 5;
         public string shieldDataFile = "ShieldConfig.xml";
         public ShieldData shieldData = null;
 
@@ -46,6 +47,7 @@ namespace RazMods
                     {
                         MyLog.Default.WriteLineAndConsole("Shield Config Loaded");
                         AegisSystems.SHIELDMULTIPLIER = shieldData.ShieldMultiplier;
+                        AegisSystems.SHIELDBUFFER = shieldData.ShieldBuffer;
                     }
                     else
                     {
@@ -152,8 +154,7 @@ namespace RazMods
                 grid.OnBlockAdded += Grid_OnBlockAdded;
                 grid.OnBlockRemoved += Grid_OnBlockRemoved;
                 grid.OnClose += Grid_OnClose;
-                grid.OnBlockIntegrityChanged += Grid_OnBlockIntegrityChanged;
-
+                //grid.OnBlockIntegrityChanged += Grid_OnBlockIntegrityChanged;
                 if (GridHasJumpDrive(grid))
                 {
                     shieldedGrids.Add(new MyGridShieldInfo(grid));
@@ -164,10 +165,11 @@ namespace RazMods
             MyAPIGateway.Entities.OnEntityAdd += CheckNewGrid;
             MyAPIGateway.Entities.OnEntityRemove += RemoveTheGrid;
             MyAPIGateway.Session.DamageSystem.RegisterBeforeDamageHandler(1, ShieldHandler);
-
+            
 
 
         }
+
 
 
         private void Grid_OnClose(IMyEntity obj)
@@ -178,7 +180,7 @@ namespace RazMods
 
                 grid.OnBlockAdded -= Grid_OnBlockAdded;
                 grid.OnBlockRemoved -= Grid_OnBlockRemoved;
-                grid.OnBlockIntegrityChanged -= Grid_OnBlockIntegrityChanged;
+                //grid.OnBlockIntegrityChanged -= Grid_OnBlockIntegrityChanged; 
                 grid.OnClose -= Grid_OnClose;
             }
         }
@@ -205,12 +207,16 @@ namespace RazMods
                                 var fat = block.FatBlock;
                                 if(fat!=null)
                                 {
-                                    Vector3D fatcoord = block.FatBlock.GetPosition();
+                                    
                                     if (sg.buffer <= 0)
                                     {
-                                        MyVisualScriptLogicProvider.CreateParticleEffectAtPosition("ShieldRazElectric", fatcoord);
+                                        Vector3D fatcoord = block.FatBlock.GetPosition();
+                                        //USE THIS FOR DAMAGE REPORT!
+                                        //MyVisualScriptLogicProvider.SetAlphaHighlightForAll(block.FatBlock.Name, true, 10, 10, Color.Red, null, 0.3f);
+                                        
+                                        //MyVisualScriptLogicProvider.CreateParticleEffectAtPosition("ShieldRazElectric", fatcoord);
                                         MyVisualScriptLogicProvider.PlaySingleSoundAtPosition("RazShieldHit", fatcoord);
-                                        sg.buffer = 5;
+                                        sg.buffer = AegisSystems.SHIELDBUFFER;
                                     } else
                                     {
                                         sg.buffer--;
@@ -245,8 +251,12 @@ namespace RazMods
             
         }
 
+        //might be causing a crash
         private void Grid_OnBlockIntegrityChanged(IMySlimBlock obj)
         {
+            /*
+            if (obj == null) return;
+
             var fat = obj.FatBlock;
             if (fat != null)
             {
@@ -257,44 +267,33 @@ namespace RazMods
                     {
                         if (!jd.IsFunctional)
                         {
-                            MyVisualScriptLogicProvider.ShowNotification("Jump Drive: " + jd.CustomName + " Is Damaged!", 5000, "Orange", jd.OwnerId);
+                            //MyVisualScriptLogicProvider.ShowNotification("Jump Drive: " + jd.CustomName + " Is Damaged!", 5000, "Orange", jd.OwnerId);
                         }
                     }
                 }
             }
+            */
         }
 
         public bool GetJumpDrivesWorking(IMyCubeGrid grid)
         {
-            List<IMySlimBlock> blocks = new List<IMySlimBlock>();
-            grid.GetBlocks(blocks);
-            
-            foreach (var block in blocks)
+            IEnumerable<IMyJumpDrive> jumpdrives = grid.GetFatBlocks<IMyJumpDrive>();
+            foreach (var jd in jumpdrives)
             {
-                var fat = block.FatBlock;
-                if (fat != null)
+                if (jd != null)
                 {
-                    if (fat as IMyJumpDrive != null)
+                    if (jd.IsWorking)
                     {
-                        IMyJumpDrive jd = (IMyJumpDrive)fat;
-                        if (jd != null)
-                        {
-
-                            if (jd.IsWorking)
-                            {
-                                return true;
-                            }
-
-
-                        }
-                    }
+                        return true;
+                    }                   
                 }
             }
-                return false;
+            return false;
         }
 
         private void Grid_OnBlockRemoved(IMySlimBlock obj)
         {
+            if (obj == null) return;
             var fat = obj.FatBlock;
             if (fat != null)
             {
@@ -308,6 +307,7 @@ namespace RazMods
                         MyGridShieldInfo sg = shieldedGrids.Find(x => x.grid == obj.CubeGrid);
                         if(sg!=null)
                         {
+                            sg.jumpDrives.Remove(jd);
                             sg.Update();
                         }
                     }
@@ -318,6 +318,7 @@ namespace RazMods
 
         private void Grid_OnBlockAdded(IMySlimBlock obj)
         {
+            if (obj == null) return;
             var fat = obj.FatBlock;
             if (fat != null)
             {
@@ -482,9 +483,13 @@ namespace RazMods
         {
             List<IMySlimBlock> blocks = new List<IMySlimBlock>();
             grid.GetBlocks(blocks);
-
-
-
+            if (enable)
+            {
+                MyVisualScriptLogicProvider.SetGridGeneralDamageModifier(grid.Name, AegisSystems.SHIELDMULTIPLIER);
+            } else
+            {
+                MyVisualScriptLogicProvider.SetGridGeneralDamageModifier(grid.Name, 1.0f);
+            }
             MyVisualScriptLogicProvider.SetAlphaHighlightForAll(grid.Name, enable, 10, 10, shieldsColor,null,0.025f);
 
             /*
@@ -519,6 +524,7 @@ namespace RazMods
             int jdcount = 0;
             foreach (var j in jumpDrives)
             {
+                if (j == null) continue;
                 IMyJumpDrive jd = (IMyJumpDrive)j;
                 if (jd != null)
                 {
@@ -568,6 +574,8 @@ namespace RazMods
             long Ownerid = 0;
             foreach (var j in jumpDrives)
             {
+                if (j == null) continue;
+
                 IMyJumpDrive jd = (IMyJumpDrive)j;
                 if (jd != null)
                 {
@@ -626,6 +634,8 @@ namespace RazMods
 
             foreach (var j in jumpDrives)
             {
+                if (j == null) continue;
+
                 IMyJumpDrive jd = (IMyJumpDrive)j;
                 if (jd != null)
                 {

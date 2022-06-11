@@ -8,6 +8,9 @@ using Sandbox.Game;
 using VRageMath;
 using VRage.Utils;
 using System.IO;
+using Sandbox.Game.SessionComponents;
+using VRage.Game.Definitions.SessionComponents;
+using Sandbox.Game.Entities;
 
 namespace RazMods
 {
@@ -16,6 +19,8 @@ namespace RazMods
     {
         public float ShieldMultiplier = 0.8f;
         public int ShieldBuffer = 5;
+        //public bool UseColorMaskShields = true;
+        public bool UseHighlightShields = true;
     }
 
     [MySessionComponentDescriptor(MyUpdateOrder.BeforeSimulation)]
@@ -29,6 +34,8 @@ namespace RazMods
         public static float SHIELDCOEIFFIENT = 0.00002f;
         public static float SHIELDMULTIPLIER = 0.8f;
         public static int SHIELDBUFFER = 5;
+        public static bool USEHIGHLIGHTSHIELDS = true;
+        //public static bool USECOLORMASKSHIELDS = true;
         public string shieldDataFile = "ShieldConfig.xml";
         public ShieldData shieldData = null;
 
@@ -48,6 +55,8 @@ namespace RazMods
                         MyLog.Default.WriteLineAndConsole("Shield Config Loaded");
                         AegisSystems.SHIELDMULTIPLIER = shieldData.ShieldMultiplier;
                         AegisSystems.SHIELDBUFFER = shieldData.ShieldBuffer;
+                        AegisSystems.USEHIGHLIGHTSHIELDS = shieldData.UseHighlightShields;
+                        //AegisSystems.USECOLORMASKSHIELDS = shieldData.UseColorMaskShields;
                     }
                     else
                     {
@@ -58,6 +67,7 @@ namespace RazMods
                         tw.Write(shielddata);
                         tw.Close();
                         MyLog.Default.WriteLineAndConsole("Shield Config Created");
+                        
                     }
                 }
             }
@@ -202,6 +212,8 @@ namespace RazMods
                         {
                             if (sg.shieldsup)
                             {
+
+
                                 sg.HandleDamage(block, ref info);
                                 
                                 var fat = block.FatBlock;
@@ -406,6 +418,7 @@ namespace RazMods
         public float shieldStrength = 0.0f;
         public bool shieldsup = false;
         public int buffer = 0;
+        public int shieldbuffer = 0;
         public int panelbuffer = 0;
         public Color shieldsColor = Color.White;
 
@@ -433,6 +446,14 @@ namespace RazMods
             {
                 shieldsColor = faction.IconColor;
             }
+
+            //turn off shields FX at update
+            if (AegisSystems.USEHIGHLIGHTSHIELDS)
+            {
+                //use slightly more visible shield FX when they first turn on
+                MyVisualScriptLogicProvider.SetAlphaHighlightForAll(grid.Name, false, 10, 20, shieldsColor, null, 0.065f);
+            }
+
 
             if (shieldStrength<=0.0f && shieldsup)
             {
@@ -485,14 +506,36 @@ namespace RazMods
             grid.GetBlocks(blocks);
             if (enable)
             {
+                
                 MyVisualScriptLogicProvider.SetGridGeneralDamageModifier(grid.Name, AegisSystems.SHIELDMULTIPLIER);
+                /* //Maybe use this for something else later on
+                MySafeZone safezone  = (MySafeZone)MySessionComponentSafeZones.CrateSafeZone(grid.PositionComp.WorldMatrixRef, Sandbox.Common.ObjectBuilders.MySafeZoneShape.Box, Sandbox.Common.ObjectBuilders.MySafeZoneAccess.Blacklist, new long[0], new long[0], 100, true, true, shieldsColor, "", 0);
+                safezone.Size = grid.LocalAABBHr.Size;
+                IMyEntity ent = safezone;
+                //ent.SetLocalMatrix(grid.PositionComp.GetOrientation());
+                ent.PositionComp.SetWorldMatrix(grid.WorldMatrix);
+                ent.PositionComp.SetPosition(grid.WorldAABBHr.Center);
+                grid.Hierarchy.AddChild(ent,true);
+                */
             } else
             {
                 MyVisualScriptLogicProvider.SetGridGeneralDamageModifier(grid.Name, 1.0f);
             }
-            MyVisualScriptLogicProvider.SetAlphaHighlightForAll(grid.Name, enable, 10, 10, shieldsColor,null,0.025f);
+            //MyVisualScriptLogicProvider.SetHighlightForAll(grid.Name, enable, 10, 10, shieldsColor, null);
 
+            if(AegisSystems.USEHIGHLIGHTSHIELDS)
+            {
+                //use slightly more visible shield FX when they first turn on
+                MyVisualScriptLogicProvider.SetAlphaHighlightForAll(grid.Name, enable, 10, 20, shieldsColor, null, 0.165f);
+            } else
+            {
+                //make sure to turn any existing off when reloading game
+                MyVisualScriptLogicProvider.SetAlphaHighlightForAll(grid.Name, false, 10, 10, shieldsColor, null, 0.025f);
+            }
+            
             /*
+            if (!AegisSystems.USECOLORMASKSHIELDS) return;
+            
             foreach (var block in blocks)
             {
                 if (block != null)
@@ -504,14 +547,18 @@ namespace RazMods
                        if(enable)
                        {
                             
-                            Vector3D fatcoord = block.FatBlock.GetPosition();
+                            //Vector3D fatcoord = block.FatBlock.GetPosition();
+
+
                             //Vector3D hitCoords = new Vector3D(block.Position.X, block.Position.Y, block.Position.Z) - cg.GetPosition();
-                            MyVisualScriptLogicProvider.CreateParticleEffectAtPosition("RazElectric", fatcoord);
-                       } else
+                            //MyVisualScriptLogicProvider.CreateParticleEffectAtPosition("RazElectric", fatcoord);
+                        } else
                        {
 
-                            Vector3D fatcoord = block.FatBlock.GetPosition();                           
-                            MyVisualScriptLogicProvider.CreateParticleEffectAtPosition("RazElectric", fatcoord);
+                            //block.FatBlock.Render.UpdateRenderEntity(Color.Black.ColorToHSV());
+                            //Vector3D fatcoord = block.FatBlock.GetPosition();
+
+                            //MyVisualScriptLogicProvider.CreateParticleEffectAtPosition("RazElectric", fatcoord);
                         }
                     }
                 }
@@ -547,11 +594,27 @@ namespace RazMods
         public void HandleDamage(IMySlimBlock block, ref MyDamageInformation info)
         {
             float shieldstrength = GetShieldStrength();
-            if(panelbuffer<=0)
+
+            if(shieldbuffer<=0)
+            {
+                if (AegisSystems.USEHIGHLIGHTSHIELDS)
+                {
+                    //show shields on damage
+                    double thick = Math.Ceiling(((shieldStrength / jumpDrives.Count) * 100) * 0.333f)*0.1;
+                    MyVisualScriptLogicProvider.SetAlphaHighlightForAll(grid.Name, true, ((int)thick), 20, shieldsColor, null, 0.065f);
+                }
+                shieldbuffer = 5;
+            }
+            shieldbuffer--;
+
+            if (panelbuffer<=0)
             {
                 UpdatePanels();
                 panelbuffer = 5;
             }
+            
+            panelbuffer--;
+
             if (shieldstrength > (info.Amount * AegisSystems.SHIELDCOEIFFIENT * AegisSystems.SHIELDMULTIPLIER))
             {
                 //block all damage               

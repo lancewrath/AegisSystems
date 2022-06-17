@@ -434,12 +434,18 @@ namespace RazMods
             //reduce lag by checking faction every update -- should add a callback when a player changes faction
             if (!hasFactionColor)
             {
-                string fname = MyVisualScriptLogicProvider.GetPlayersFactionName(grid.BigOwners[0]);
-                IMyFaction faction = MyAPIGateway.Session.Factions.TryGetFactionByName(fname);
-                if (faction != null)
+                if (grid.BigOwners != null)
                 {
-                    hasFactionColor = true;
-                    shieldsColor = faction.IconColor;
+                    if (grid.BigOwners.Count > 0)
+                    {
+                        string fname = MyVisualScriptLogicProvider.GetPlayersFactionName(grid.BigOwners[0]);
+                        IMyFaction faction = MyAPIGateway.Session.Factions.TryGetFactionByName(fname);
+                        if (faction != null)
+                        {
+                            hasFactionColor = true;
+                            shieldsColor = faction.IconColor;
+                        }
+                    }
                 }
             }
 

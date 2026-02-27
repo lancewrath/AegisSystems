@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System;
 using VRage.Game.Components;
 using VRage.Game.ModAPI;
@@ -105,8 +105,16 @@ namespace RazMods
 
             if (delay == 120)
             {
+                List<MyGridShieldInfo> toRemove = null;
                 foreach (var grid in shieldedGrids)
-                {               
+                {
+                    // Skip invalid grids (destroyed/split) to avoid null reference crashes
+                    if (grid?.grid == null || (grid.grid as IMyEntity)?.Closed == true)
+                    {
+                        if (toRemove == null) toRemove = new List<MyGridShieldInfo>();
+                        toRemove.Add(grid);
+                        continue;
+                    }
                     grid.Update();
                     if (grid.shieldStrength <= 0.0f)
                     {                       
@@ -143,6 +151,11 @@ namespace RazMods
                         }
                     }
                 }
+                if (toRemove != null)
+                {
+                    foreach (var g in toRemove)
+                        shieldedGrids.Remove(g);
+                }
                 delay = 0;
             }
         }
@@ -160,19 +173,16 @@ namespace RazMods
             foreach (IMyEntity entity in entities)
             {
                 var grid = entity as IMyCubeGrid;
-
-                if (grid == null)
+                if (grid == null || entity.Closed) continue;
+                try
                 {
-                    continue;
+                    grid.OnBlockAdded += Grid_OnBlockAdded;
+                    grid.OnBlockRemoved += Grid_OnBlockRemoved;
+                    grid.OnClose += Grid_OnClose;
                 }
-                grid.OnBlockAdded += Grid_OnBlockAdded;
-                grid.OnBlockRemoved += Grid_OnBlockRemoved;
-                grid.OnClose += Grid_OnClose;
-
+                catch { continue; }
                 if (GridHasJumpDrive(grid))
-                {
                     shieldedGrids.Add(new MyGridShieldInfo(grid));
-                }
             }
 
             MyLog.Default.WriteLineAndConsole("Aegis Mod Initialized");
@@ -189,75 +199,72 @@ namespace RazMods
 
         private void Grid_OnClose(IMyEntity obj)
         {
-            if(obj as IMyCubeGrid != null)
+            IMyCubeGrid grid = obj as IMyCubeGrid;
+            if (grid == null)
+                return;
+            try
             {
-                IMyCubeGrid grid = obj as IMyCubeGrid;
-
                 grid.OnBlockAdded -= Grid_OnBlockAdded;
                 grid.OnBlockRemoved -= Grid_OnBlockRemoved;
                 grid.OnClose -= Grid_OnClose;
-                //just make sure grid is removed from list entirely.
-                MyGridShieldInfo sgrid = shieldedGrids.Find(g => g.grid == grid);
-                if(sgrid != null)
-                {
+            }
+            finally
+            {
+                // Just make sure grid is removed from list entirely (safe even if grid is closing)
+                MyGridShieldInfo sgrid = shieldedGrids.Find(g => g?.grid == grid);
+                if (sgrid != null)
                     shieldedGrids.Remove(sgrid);
-                }
             }
         }
 
         private void ShieldHandler(object target, ref MyDamageInformation info)
         {
-            
-            if (target as IMySlimBlock != null)
+            var block = target as IMySlimBlock;
+            if (block == null)
+                return;
+            var cg = block.CubeGrid;
+            if (cg == null || (cg as IMyEntity)?.Closed == true)
+                return;
+            MyGridShieldInfo sg = shieldedGrids.Find(x => x?.grid == cg);
+            if (sg == null)
+                return;
+            if (!sg.shieldsup)
+                return;
+            sg.HandleDamage(block, ref info);
+            var fat = block.FatBlock;
+            if (fat != null && sg.buffer <= 0)
             {
-                var block = target as IMySlimBlock;
-                if(block != null)
+                try
                 {
-                    var cg = block.CubeGrid;
-                    if (cg != null)
-                    {
-                        MyGridShieldInfo sg = shieldedGrids.Find(x => x.grid == cg);
-                        if (sg != null)
-                        {
-                            if (sg.shieldsup)
-                            {
-                                sg.HandleDamage(block, ref info);
-                                
-                                var fat = block.FatBlock;
-                                if(fat!=null)
-                                {
-                                    
-                                    if (sg.buffer <= 0)
-                                    {
-                                        Vector3D fatcoord = block.FatBlock.GetPosition();
-                                        MyVisualScriptLogicProvider.PlaySingleSoundAtPosition("RazShieldHit", fatcoord);
-                                        sg.buffer = AegisSystems.SHIELDBUFFER;
-                                    } else
-                                    {
-                                        sg.buffer--;
-                                    }
-                                }
-
-                                
-                            }
-                        }
-                    }
+                    Vector3D fatcoord = fat.GetPosition();
+                    MyVisualScriptLogicProvider.PlaySingleSoundAtPosition("RazShieldHit", fatcoord);
                 }
-                
-
-                
+                catch { /* block may be invalid during grid split */ }
+                sg.buffer = AegisSystems.SHIELDBUFFER;
+            }
+            else if (fat != null)
+            {
+                sg.buffer--;
             }
         }
 
         bool GridHasJumpDrive(IMyCubeGrid grid)
         {
+            if (grid == null || (grid as IMyEntity)?.Closed == true)
+                return false;
             IEnumerable<IMyJumpDrive> jumpdrives = grid.GetFatBlocks<IMyJumpDrive>();
-
+            if (jumpdrives == null)
+                return false;
             int count = 0;
-            foreach(var jd in jumpdrives)
+            foreach (var jd in jumpdrives)
             {
-                if (!jd.CustomData.Contains("[NOSHIELD]"))
-                    count++;
+                if (jd == null) continue;
+                try
+                {
+                    if (!jd.CustomData.Contains("[NOSHIELD]"))
+                        count++;
+                }
+                catch { /* block may be closed */ }
             }
             if(count>0)
             {
@@ -286,99 +293,76 @@ namespace RazMods
         private void Grid_OnBlockRemoved(IMySlimBlock obj)
         {
             if (obj == null) return;
+            IMyCubeGrid cubeGrid = obj.CubeGrid;
+            if (cubeGrid == null) return; // Grid may already be gone (e.g. split/destroyed)
             var fat = obj.FatBlock;
-            if (fat != null)
-            {
-                if (fat as IMyJumpDrive != null)
-                {
-                    IMyJumpDrive jd = (IMyJumpDrive)fat;
-                    if (jd != null)
-                    {
-                        MyGridShieldInfo sg = shieldedGrids.Find(x => x.grid == obj.CubeGrid);
-                        if(sg!=null)
-                        {
-                            sg.jumpDrives.Remove(jd);
-                            sg.getblocksbuffer = 0;
-                            sg.Update();
-                        }
-                    }
-                    
-                }
-            }
+            if (fat == null) return;
+            IMyJumpDrive jd = fat as IMyJumpDrive;
+            if (jd == null) return;
+            MyGridShieldInfo sg = shieldedGrids.Find(x => x?.grid == cubeGrid);
+            if (sg == null) return;
+            if (sg.jumpDrives != null)
+                sg.jumpDrives.Remove(jd);
+            sg.getblocksbuffer = 0;
+            try { sg.Update(); } catch { /* grid/jumpDrives may be in invalid state */ }
         }
 
         private void Grid_OnBlockAdded(IMySlimBlock obj)
         {
             if (obj == null) return;
+            IMyCubeGrid cubeGrid = obj.CubeGrid;
+            if (cubeGrid == null) return;
             var fat = obj.FatBlock;
-            if (fat != null)
+            if (fat == null) return;
+            IMyJumpDrive jd = fat as IMyJumpDrive;
+            if (jd == null) return;
+            try
             {
-                if (fat as IMyJumpDrive != null)
-                {
-                    IMyJumpDrive jd = fat as IMyJumpDrive;
-                    if (jd != null)
-                    {
-
-                        MyVisualScriptLogicProvider.ShowNotification("Aegis Systems Firmware Installed into Jump Drive", 5000, "Green", jd.OwnerId);
-                        MyGridShieldInfo sg = shieldedGrids.Find(x => x.grid == obj.CubeGrid);
-
-                        if (sg == null)
-                        {
-                            sg = new MyGridShieldInfo(obj.CubeGrid);
-                            shieldedGrids.Add(sg);
-                        }
-                        
-                        if (sg != null)
-                        {
-                            sg.getblocksbuffer = 0;
-                            sg.Update();
-                        }
-                    }
-                }
+                MyVisualScriptLogicProvider.ShowNotification("Aegis Systems Firmware Installed into Jump Drive", 5000, "Green", jd.OwnerId);
             }
+            catch { /* avoid crash if UI/owner invalid */ }
+            MyGridShieldInfo sg = shieldedGrids.Find(x => x?.grid == cubeGrid);
+            if (sg == null)
+            {
+                sg = new MyGridShieldInfo(cubeGrid);
+                shieldedGrids.Add(sg);
+            }
+            sg.getblocksbuffer = 0;
+            try { sg.Update(); } catch { /* grid may be in flux during merge/split */ }
         }
 
         public void RemoveTheGrid(IMyEntity entity)
         {
             var grid = entity as IMyCubeGrid;
-
-            if (grid == null)
+            if (grid == null) return;
+            try
             {
-                return;
+                grid.OnBlockAdded -= Grid_OnBlockAdded;
+                grid.OnBlockRemoved -= Grid_OnBlockRemoved;
+                grid.OnClose -= Grid_OnClose;
             }
-
-            grid.OnBlockAdded -= Grid_OnBlockAdded;
-            grid.OnBlockRemoved -= Grid_OnBlockRemoved;
-            grid.OnClose -= Grid_OnClose;
-
-            var sg = shieldedGrids.Find(x => x.grid == grid);
-            if(sg!=null)
-            {
+            catch { /* grid may already be closing */ }
+            var sg = shieldedGrids.Find(x => x?.grid == grid);
+            if (sg != null)
                 shieldedGrids.Remove(sg);
-
-            }
         }
 
         public void CheckNewGrid(IMyEntity entity)
         {
             var grid = entity as IMyCubeGrid;
-
-            if (grid == null)
+            if (grid == null || (grid as IMyEntity)?.Closed == true) return;
+            try
             {
-                return;
+                grid.OnBlockAdded += Grid_OnBlockAdded;
+                grid.OnBlockRemoved += Grid_OnBlockRemoved;
+                grid.OnClose += Grid_OnClose;
             }
-
-            grid.OnBlockAdded += Grid_OnBlockAdded;
-            grid.OnBlockRemoved += Grid_OnBlockRemoved;
-            grid.OnClose += Grid_OnClose;
-
+            catch { /* entity may be invalid */ return; }
             if (GridHasJumpDrive(grid))
             {
-                MyGridShieldInfo sg = shieldedGrids.Find(x => x.grid == grid);
+                MyGridShieldInfo sg = shieldedGrids.Find(x => x?.grid == grid);
                 if (sg == null)
-                {
                     shieldedGrids.Add(new MyGridShieldInfo(grid));
-                }
             }
             delay = 0;
         }
@@ -408,25 +392,35 @@ namespace RazMods
         public MyGridShieldInfo(IMyCubeGrid g)
         {
             grid = g;
-            jumpDrives = GetJumpDrives(g);
+            jumpDrives = g != null ? GetJumpDrives(g) : new List<IMyJumpDrive>();
+            if (jumpDrives == null)
+                jumpDrives = new List<IMyJumpDrive>();
+            panels = new List<IMyTextPanel>();
             shieldStrength = GetShieldStrength(jumpDrives);
         }
 
         public void Update()
         {
+            if (grid == null || (grid as IMyEntity)?.Closed == true)
+                return;
+            if (jumpDrives == null)
+                jumpDrives = new List<IMyJumpDrive>();
+            if (panels == null)
+                panels = new List<IMyTextPanel>();
             buffer = 0;
             shieldbuffer = 0;
-            //help reduce lag by less frequent calls to update block listing.
+            // Help reduce lag by less frequent calls to update block listing.
             if (getblocksbuffer <= 0)
             {
                 jumpDrives = GetJumpDrives(grid);
                 panels = GetPanels(grid);
+                if (jumpDrives == null) jumpDrives = new List<IMyJumpDrive>();
+                if (panels == null) panels = new List<IMyTextPanel>();
                 getblocksbuffer = 10;
             }
             getblocksbuffer--;
             messagebuffer = 0;
             messagebufferB = 0;
-            
             shieldStrength = GetShieldStrength(jumpDrives);
 
            
@@ -468,15 +462,19 @@ namespace RazMods
             }
 
 
-            if (shieldStrength<=0.0f && shieldsup)
+            if (shieldStrength <= 0.0f && shieldsup)
             {
-                MyVisualScriptLogicProvider.PlaySingleSoundAtPosition("RazShieldDown", grid.GetPosition());
-                if(shieldFX)
+                try
                 {
-                    ShieldFX(false);
+                    if (grid != null && (grid as IMyEntity)?.Closed != true)
+                    {
+                        MyVisualScriptLogicProvider.PlaySingleSoundAtPosition("RazShieldDown", grid.GetPosition());
+                        MyVisualScriptLogicProvider.SetGridGeneralDamageModifier(grid.Name, 1.0f);
+                    }
                 }
-                //Added damage modifier to system
-                MyVisualScriptLogicProvider.SetGridGeneralDamageModifier(grid.Name, 1.0f);
+                catch { /* grid may have been destroyed */ }
+                if (shieldFX)
+                    ShieldFX(false);
                 shieldsup = false;
             }
             UpdatePanels();
@@ -485,43 +483,44 @@ namespace RazMods
 
         public void UpdatePanels()
         {
+            if (panels == null || jumpDrives == null) return;
+            int jdCount = jumpDrives.Count;
+            if (jdCount <= 0) jdCount = 1; // Avoid division by zero
             float ss = 0.0f;
             string bar = "";
-            while (ss < (Math.Ceiling((shieldStrength / jumpDrives.Count) * 0.333)))
+            float barLimit = (float)Math.Ceiling((shieldStrength / jdCount) * 0.333f);
+            while (ss < barLimit)
             {
                 bar = bar + Convert.ToChar(Convert.ToUInt32("e2d2", 16)).ToString();
                 ss += 0.1f;
             }
             foreach (var tp in panels)
             {
-                if (shieldsup)
+                if (tp == null) continue;
+                try
                 {
-                    tp.WriteText("Shields Up \n");
-                } else
-                {
+                    if (shieldsup)
+                        tp.WriteText("Shields Up \n");
+                    else if (jumpDrives.Count > 0)
+                        tp.WriteText("Recharging \n");
+                    else
+                        tp.WriteText("No Shields \n");
                     if (jumpDrives.Count > 0)
                     {
-                        tp.WriteText("Recharging \n");
-                    } else
-                    {
-                        tp.WriteText("No Shields \n");
+                        tp.WriteText(Math.Ceiling(((shieldStrength / jdCount) * 100) * 0.333f) + "% \n", true);
+                        tp.WriteText(bar, true);
                     }
+                    else
+                        tp.WriteText("--", true);
                 }
-                if (jumpDrives.Count > 0)
-                {
-                    tp.WriteText(Math.Ceiling(((shieldStrength/ jumpDrives.Count) * 100) * 0.333f) + "% \n", true);
-                    tp.WriteText(bar, true);
-                } else
-                {
-                    tp.WriteText("--", true);
-                }
-
+                catch { /* panel or grid may be closed */ }
             }
         }
 
-        public void ShieldFX(bool enable,int thicc = 10)
+        public void ShieldFX(bool enable, int thicc = 10)
         {
-           
+            if (grid == null || (grid as IMyEntity)?.Closed == true)
+                return;
             if (enable)
             {                               
                 if (AegisSystems.USEHIGHLIGHTSHIELDS && !shieldFX)
@@ -544,35 +543,33 @@ namespace RazMods
 
         public int MaxPowerJumpDrives()
         {
+            if (jumpDrives == null) return 0;
             int jdcount = 0;
             foreach (var j in jumpDrives)
             {
-                if (j == null) continue;
-                IMyJumpDrive jd = (IMyJumpDrive)j;
-                if (jd != null)
+                if (j == null || (j as IMyEntity)?.Closed == true) continue;
+                try
                 {
-                    if (jd.IsFunctional && jd.Enabled && !jd.CustomData.Contains("[NOSHIELD]"))
-                    {
-                        if(jd.CurrentStoredPower==jd.MaxStoredPower)
-                        {
-                            jdcount++;
-                        }
-                    }
+                    if (j.IsFunctional && j.Enabled && !j.CustomData.Contains("[NOSHIELD]") && j.CurrentStoredPower == j.MaxStoredPower)
+                        jdcount++;
                 }
+                catch { /* block may be destroyed */ }
             }
             return jdcount;
         }
 
         public void HandleDamage(IMySlimBlock block, ref MyDamageInformation info)
         {
+            if (grid == null || (grid as IMyEntity)?.Closed == true) return;
+            if (jumpDrives == null) return;
             float shieldstrength = GetShieldStrength();
-
-            if(shieldbuffer<=0)
+            int jdCount = jumpDrives.Count;
+            if (jdCount <= 0) jdCount = 1;
+            if (shieldbuffer <= 0)
             {
                 if (AegisSystems.USEHIGHLIGHTSHIELDS)
                 {
-                    //show shields on damage
-                    double thick = Math.Ceiling(((shieldStrength / jumpDrives.Count) * 100) * 0.333f)*0.1;
+                    double thick = Math.Ceiling(((shieldStrength / jdCount) * 100) * 0.333f) * 0.1;
                     ShieldFX(true, (int)thick);
                 }
                 shieldbuffer = AegisSystems.SHIELDBUFFER;
@@ -606,141 +603,145 @@ namespace RazMods
 
         public void OverLoad(ref MyDamageInformation info)
         {
+            if (grid == null || (grid as IMyEntity)?.Closed == true) return;
+            if (jumpDrives == null) return;
             long Ownerid = 0;
             foreach (var j in jumpDrives)
             {
-                if (j == null) continue;
-
-                IMyJumpDrive jd = (IMyJumpDrive)j;
-                if (jd != null)
+                if (j == null || (j as IMyEntity)?.Closed == true) continue;
+                try
                 {
-                    if (jd.IsFunctional && jd.Enabled)
+                    if (j.IsFunctional && j.Enabled)
                     {
-                       
-                        info.Amount -= jd.CurrentStoredPower;
+                        info.Amount -= j.CurrentStoredPower;
                         info.IsDeformation = false;
-                        jd.CurrentStoredPower = 0;
-                        
+                        j.CurrentStoredPower = 0;
                     }
-                    Ownerid = jd.OwnerId;
+                    Ownerid = j.OwnerId;
                 }
+                catch { /* block may be destroyed */ }
             }
-            MyVisualScriptLogicProvider.ShowNotification("Shields Are Down", 5000, "Red", Ownerid);
-            MyVisualScriptLogicProvider.PlaySingleSoundAtPosition("RazShieldDown", grid.GetPosition());
-            MyVisualScriptLogicProvider.SetGridGeneralDamageModifier(grid.Name, 1.0f);
+            try
+            {
+                MyVisualScriptLogicProvider.ShowNotification("Shields Are Down", 5000, "Red", Ownerid);
+                MyVisualScriptLogicProvider.PlaySingleSoundAtPosition("RazShieldDown", grid.GetPosition());
+                MyVisualScriptLogicProvider.SetGridGeneralDamageModifier(grid.Name, 1.0f);
+            }
+            catch { /* grid may be invalid */ }
             ShieldFX(false);
             shieldsup = false;
         }
 
         public float ApplyShieldDamage(float damage)
         {
+            if (jumpDrives == null) return damage;
             foreach (var j in jumpDrives)
             {
-
-                if (j != null)
+                if (j == null || (j as IMyEntity)?.Closed == true) continue;
+                try
                 {
-                    if (j.IsFunctional && j.Enabled)
+                    if (!j.IsFunctional || !j.Enabled) continue;
+                    float coeff = AegisSystems.SHIELDCOEIFFIENT * AegisSystems.SHIELDMULTIPLIER;
+                    if (j.CurrentStoredPower <= damage * coeff)
                     {
-                        if(j.CurrentStoredPower <= damage * (AegisSystems.SHIELDCOEIFFIENT * AegisSystems.SHIELDMULTIPLIER))
+                        damage -= j.CurrentStoredPower / coeff;
+                        j.CurrentStoredPower = 0;
+                        if (messagebuffer <= 0)
                         {
-                            damage -= j.CurrentStoredPower / (AegisSystems.SHIELDCOEIFFIENT* AegisSystems.SHIELDMULTIPLIER);
-                            j.CurrentStoredPower = 0;
-                            if (messagebuffer <= 0)
-                            {
-                                MyVisualScriptLogicProvider.ShowNotification("Jump Drive: " + j.CustomName + " Has Been Fully Drained", 5000, "Red", j.OwnerId);
-                                messagebuffer = 10;
-                            }
-                            messagebuffer--;
-                        } else
-                        {
-                            //MyAPIGateway.Utilities.ShowMessage("Aegis", "JD Charge: "+ jd.CurrentStoredPower+" - Damage: "+(damage * 0.001f));
-                            j.CurrentStoredPower -= damage * (AegisSystems.SHIELDCOEIFFIENT * AegisSystems.SHIELDMULTIPLIER);
-                            if(j.CurrentStoredPower <= 0.2)
-                            {
-                                if (messagebufferB <= 0)
-                                {
-                                    MyVisualScriptLogicProvider.ShowNotification("Warning Shield Integrity for " + j.CustomName + "Critically Low", 5000, "Yellow", j.OwnerId);
-                                    messagebufferB = 20;
-                                }
-                                messagebufferB--;
-                            }
-                            return 0.0f;
+                            MyVisualScriptLogicProvider.ShowNotification("Jump Drive: " + j.CustomName + " Has Been Fully Drained", 5000, "Red", j.OwnerId);
+                            messagebuffer = 10;
                         }
-                        
+                        messagebuffer--;
+                    }
+                    else
+                    {
+                        j.CurrentStoredPower -= damage * coeff;
+                        if (j.CurrentStoredPower <= 0.2f)
+                        {
+                            if (messagebufferB <= 0)
+                            {
+                                MyVisualScriptLogicProvider.ShowNotification("Warning Shield Integrity for " + j.CustomName + " Critically Low", 5000, "Yellow", j.OwnerId);
+                                messagebufferB = 20;
+                            }
+                            messagebufferB--;
+                        }
+                        return 0.0f;
                     }
                 }
+                catch { /* block may be destroyed */ }
             }
             return damage;
         }
 
         public float GetShieldStrength()
         {
+            if (jumpDrives == null) return 0.0f;
             float shields = 0.0f;
-
             foreach (var j in jumpDrives)
             {
-                if (j == null) continue;
-
-                IMyJumpDrive jd = (IMyJumpDrive)j;
-                if (jd != null)
+                if (j == null || (j as IMyEntity)?.Closed == true) continue;
+                try
                 {
-                    if (jd.IsFunctional && jd.Enabled && !jd.CustomData.Contains("[NOSHIELD]"))
-                    {
-                        shields += jd.CurrentStoredPower;
-                    }
+                    if (j.IsFunctional && j.Enabled && !j.CustomData.Contains("[NOSHIELD]"))
+                        shields += j.CurrentStoredPower;
                 }
+                catch { /* block may be destroyed */ }
             }
-            //shields = jumpDrives.Count*100.0f;
             return shields;
         }
 
         public static float GetShieldStrength(List<IMyJumpDrive> jumpdrives)
         {
+            if (jumpdrives == null) return 0.0f;
             float shields = 0.0f;
-
             foreach (var j in jumpdrives)
             {
-                
-                if (j != null)
+                if (j == null || (j as IMyEntity)?.Closed == true) continue;
+                try
                 {
-                    if (j.IsFunctional && j.Enabled & !j.CustomData.Contains("[NOSHIELD]"))
-                    {
+                    if (j.IsFunctional && j.Enabled && !j.CustomData.Contains("[NOSHIELD]"))
                         shields += j.CurrentStoredPower;
-                    }
                 }
+                catch { /* block may be destroyed */ }
             }
-            //shields = jumpdrives.Count*100.0f;
             return shields;
         }
 
         public static List<IMyTextPanel> GetPanels(IMyCubeGrid grid)
         {
             List<IMyTextPanel> textPanels = new List<IMyTextPanel>();
-
-            if (grid == null)
+            if (grid == null || (grid as IMyEntity)?.Closed == true)
                 return textPanels;
             IEnumerable<IMyTextPanel> tp = grid.GetFatBlocks<IMyTextPanel>();
+            if (tp == null) return textPanels;
             foreach (var block in tp)
             {
-                if(block.CustomData.Contains("[SHIELD]"))
-                    textPanels.Add(block);
-
+                if (block == null) continue;
+                try
+                {
+                    if (block.CustomData != null && block.CustomData.Contains("[SHIELD]"))
+                        textPanels.Add(block);
+                }
+                catch { /* block may be closed */ }
             }
             return textPanels;
         }
         public static List<IMyJumpDrive> GetJumpDrives(IMyCubeGrid grid)
         {
-            
             List<IMyJumpDrive> jumpDrives = new List<IMyJumpDrive>();
-            
-            if (grid == null)
+            if (grid == null || (grid as IMyEntity)?.Closed == true)
                 return jumpDrives;
             IEnumerable<IMyJumpDrive> jd = grid.GetFatBlocks<IMyJumpDrive>();
+            if (jd == null) return jumpDrives;
             foreach (var block in jd)
             {
-                if (!block.CustomData.Contains("[NOSHIELD]"))
-                    jumpDrives.Add(block);
-
+                if (block == null || (block as IMyEntity)?.Closed == true) continue;
+                try
+                {
+                    if (block.CustomData == null || !block.CustomData.Contains("[NOSHIELD]"))
+                        jumpDrives.Add(block);
+                }
+                catch { /* block may be invalid during grid split */ }
             }
             return jumpDrives;
         }

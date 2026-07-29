@@ -10,6 +10,20 @@ This mod can be added and removed safely it does not change any blocks in the ga
 
 There are indicators when shields go up and when they fail as well as some visuals.
 
+Update 1.1.2
+
+Performance and notification spam reductions (chat/notifications were reported to lag servers during combat):
+- Added a rate-limited notification queue: messages are drained slowly (~0.75s apart) instead of firing instantly on every shield event.
+- Same message type for the same jump drive/grid cannot re-queue until a cooldown expires (~5s by default).
+- Critical-low and fully-drained warnings now fire once per jump drive until it recharges (not every hit while low).
+- "Shields Are Down" also limited to once until shields recover.
+- New config options in ShieldConfig.xml: EnableNotifications, NotificationCooldownTicks, NotificationSendInterval, MaxQueuedNotifications.
+- Replaced linear List.Find grid lookups with a Dictionary for O(1) access on every damage event.
+- Stopped resetting hit sound/FX buffers every update (that was defeating throttling during sustained fire).
+- LCD [SHIELD] panels only update on the periodic shield tick — no longer rewritten on every few damage hits (large network savings).
+- Removed init chat message; firmware install notifications are cooldown-gated per grid.
+- Optimized LCD bar string building.
+
 Update 1.1.1
 
 Null-safety and crash-prevention fixes to improve server stability when grids break apart or jump drives are destroyed:
